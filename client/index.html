@@ -1,0 +1,424 @@
+<head>
+	<style>
+		button {
+			height: 25px;
+			width: 105px;
+		}
+
+		input {
+			height: 25px;
+		}
+	</style>
+	<title>Werewolf</title>
+	<link rel="icon" href="img/favicon.png">
+	<link href="style.css" rel="stylesheet" type="text/css" media="all">
+</head>
+
+<body>
+	<h1 class="glitch" id="heading" data-text="Werewolf">Werewolf</h1>
+
+	<div id="menu">
+		<br>
+		<div></div>
+		<button onclick="showHostGameMenu()">Host Game</button>
+		<button onclick="showJoinGameMenu()">Join Game</button>
+		<a href="instructions.html"><button>How to Play</button></a>
+		<br><br>
+		<div id="hostGameMenu" style="display:none;">
+			<input id="hostGameUsername" placeholder="Username">
+			<br>
+			<span id="hostGameError" style="display:none; color:red;"><br></span>
+			<br>
+			<button onclick="startGame()">Go</button>
+		</div>
+		<div id="joinGameMenu" style="display:none;">
+			<input autocomplete="off" id="joinGameCode" placeholder="Game Code">
+			<input autocomplete="off" id="joinGameUsername" placeholder="Username">
+			<br>
+			<span id="joinGameError" style="display:none; color:red;"><br></span>
+			<br>
+			<button onclick="joinGame()">Join</button>
+		</div>
+		<h2>Public Games</h2>
+		Don't have a group of friends available to play? Join a public game by using one of the codes below!
+		<div id="publicGames"></div>
+	</div>
+	<br>
+	<div id="game" style="display:none;" width="100%">
+		<div id="navbar" class="navbar" style="display:none; left: 0px; background-color:#191919;">
+			<span id="navbarText" class="glitch" style="left: 10px;" data-text="Werewolf"> Werewolf &nbsp;</span>
+			<button onclick="leaveGame()">Leave Game</button>
+			<a href="/"><button>Home</button></a>
+			<a href="instructions.html"><button>How to Play</button></a>
+		</div>
+		<br><br>
+		<div id="chat"></div>
+		<br>
+		<div id="chatInput" style="position: fixed; bottom:10px; width:100%">
+			<input style="width:60%" autocomplete="off" placeholder="Message" autofocus id="messageBox">
+			<button onclick="sendMessage()">Send</button>
+			<button onclick="start()">!start</button>
+			<button>!vote</button>
+			<button>!kill</button>
+		</div>
+	</div>
+</body>
+
+<script>
+	const server = "26.77.116.0:5505";
+	let password;
+	let gameCode;
+	let connection;
+	let username;
+	document.addEventListener('keydown', function (event) {
+		if (event.key == "Enter") {
+			sendMessage();
+		}
+	});
+	// checks if previously saved game
+	if (!!localStorage.code && !!localStorage.password) {
+		// sets data
+		password = localStorage.password;
+		gameCode = localStorage.code;
+
+		// sets up connection
+		setUpConnection();
+
+		// shows game
+		menu.style.display = "none";
+		game.style.display = "block";
+		heading.style.display = "none";
+		navbar.style.display = "block";
+		navbarText.innerHTML = `Werewolf: Game ${gameCode} &nbsp;`;
+		navbarText.dataset.text = `Werewolf: Game ${gameCode} &nbsp;`;
+		messageBox.focus();
+
+		// adds enter key event listener
+	} else {
+		// shows public games
+		fetch(`http://${server}/game/publicGames`, {
+			method: "POST",
+			headers: {
+				'Access-Control-Allow-Origin': '*',
+			}
+		})
+			.then(response => {
+				// checks if response was ok
+				if (response.ok) {
+					return response.text();
+				} else {
+					publicGames.innerHTML = "<br><i>There are no public games open right now.</i>";
+					return;
+				}
+			})
+			.then(data => {
+
+				// checks if no data returned
+				if (!data || JSON.parse(data).length == 0) {
+					publicGames.innerHTML = "<br><i>There are no public games open right now.</i>";
+					return;
+				}
+
+				// displays public games
+				let publicGamesList = "<br><li>" + JSON.parse(data).join("</li><li>") + "</li>";
+				publicGames.innerHTML = publicGamesList;
+			}).catch(function (error) {
+				publicGames.innerHTML = "<br><i>There are no public games open right now.</i>";
+				return;
+			});
+	}
+	function showJoinGameMenu() {
+		document.getElementById('joinGameMenu').style.display = 'block';
+		document.getElementById('hostGameMenu').style.display = 'none';
+	}
+	function showHostGameMenu() {
+		document.getElementById('hostGameMenu').style.display = 'block';
+		document.getElementById('joinGameMenu').style.display = 'none';
+	}
+	function startGame() {
+		username = document.getElementById('hostGameUsername').value.trim(); // Store the username
+		// console.log('Username:', username);
+		localStorage.setItem("username", username); // Store the username in localStorage
+		if (!username) {
+			document.getElementById('hostGameError').style.display = "block";
+			document.getElementById('hostGameError').innerHTML = "<br>Username is required";
+			return;
+		}
+
+		fetch(`http://${server}/game/createGame`, {
+			method: "POST",
+			headers: {
+				'Content-Type': 'application/json'
+			},
+			body: JSON.stringify({ name: username })
+		})
+			.then(response => {
+				if (!response.ok) {
+					return response.text().then(text => { throw new Error(text); });
+				}
+				return response.json();
+			})
+			.then(data => {
+				if (data.message) {
+					document.getElementById('hostGameError').style.display = "block";
+					document.getElementById('hostGameError').innerHTML = `<br>${data.message}`;
+				} else {
+					localStorage.setItem("code", data.code);
+					localStorage.setItem("password", data.password);
+					gameCode = data.code;
+					password = data.password;
+
+					menu.style.display = "none";
+					game.style.display = "block";
+					heading.style.display = "none";
+					navbar.style.display = "block";
+					navbarText.innerHTML = `Werewolf: Game ${gameCode} &nbsp;`;
+					messageBox.focus();
+					// console.log('Game started:', data);
+
+
+					// Connect WebSocket after game is started
+					setUpConnection();
+
+
+				}
+			})
+			.catch(error => {
+				console.error('Error starting game:', error);
+				document.getElementById('hostGameError').style.display = "block";
+				document.getElementById('hostGameError').innerHTML = `<br>${error.message}`;
+			});
+	}
+
+	function joinGame() {
+		username = document.getElementById('joinGameUsername').value.trim(); // Store the username
+		console.log('Username:', username);
+		localStorage.setItem("username", username); // Store the username in localStorage
+		const code = document.getElementById('joinGameCode').value.trim();
+		if (!username || !code) {
+			document.getElementById('joinGameError').style.display = "block";
+			document.getElementById('joinGameError').innerHTML = "<br>Username and Game Code are required";
+			return;
+		}
+
+		fetch(`http://${server}/game/joinGame`, {
+			method: "POST",
+			headers: {
+				'Content-Type': 'application/json'
+			},
+			body: JSON.stringify({ name: username, code: code })
+		})
+			.then(response => {
+				if (!response.ok) {
+					return response.text().then(text => { throw new Error(text); });
+				}
+				return response.json();
+			})
+			.then(data => {
+				if (data.message) {
+					document.getElementById('joinGameError').style.display = "block";
+					document.getElementById('joinGameError').innerHTML = `<br>${data.message}`;
+				} else {
+					localStorage.setItem("code", data.code);
+					localStorage.setItem("password", data.password);
+					gameCode = data.code;
+					password = data.password;
+
+					menu.style.display = "none";
+					game.style.display = "block";
+					heading.style.display = "none";
+					navbar.style.display = "block";
+					navbarText.innerHTML = `Werewolf: Game ${gameCode} &nbsp;`;
+					messageBox.focus();
+					console.log('Joined game:', data);
+
+					// Connect WebSocket after joining the game
+					setUpConnection();
+				}
+			})
+			.catch(error => {
+				console.error('Error joining game:', error);
+				document.getElementById('joinGameError').style.display = "block";
+				document.getElementById('joinGameError').innerHTML = `<br>${error.message}`;
+			});
+	}
+
+	function setUpConnection() {
+		// Check if a connection already exists
+		if (connection && connection.readyState !== WebSocket.CLOSED) {
+			console.log("WebSocket connection already exists");
+			return;
+		}
+
+		// Establish connection with WebSocket server
+		connection = new WebSocket(`ws://${server}`);
+
+		connection.addEventListener("open", function (event) {
+			console.log("opened");
+			connection.send(JSON.stringify({
+				password: password,
+				code: gameCode,
+				action: "linkConnection",
+				name: username // Include the player's name
+			}));
+		});
+
+		connection.addEventListener("error", function (event) {
+			console.error("WebSocket error:", event);
+			hostGameError.style.display = "block";
+			hostGameError.innerHTML = "<br>Failed to connect to the WebSocket server.";
+		});
+
+		let scrolledToBottom = true;
+		window.onscroll = function (e) {
+			scrolledToBottom = (window.innerHeight + window.pageYOffset) >= document.body.offsetHeight;
+		};
+
+		connection.addEventListener("message", function (event) {
+			const message = JSON.parse(event.data);
+			handleWebSocketMessage(message, scrolledToBottom);
+		});
+	}
+	function handleWebSocketMessage(message, scrolledToBottom) {
+		console.log('Received message:', message); // Debugging statement
+		if (message.action === 'receiveMessage') {
+			displayMessage(message.sender, message.message, message.date, scrolledToBottom);
+		} else if (message.action === 'joinGame') {
+			displayMessage(message.sender, message.message, message.date, scrolledToBottom); // Handle joinGame action
+			console.log('Player joined:', message);
+		} else if (message.action === 'startGame') {
+			console.log('Game started:', message);
+		} else {
+			console.error('Unknown action:', message.action);
+		}
+	}
+
+	function displayMessage(sender, message, date, scrolledToBottom) {
+		const chat = document.getElementById('chat');
+		const formattedDate = formatDate(date);
+		// Create container for each message
+		const messageContainer = document.createElement('div');
+		messageContainer.classList.add('message-container');
+
+		// Avatar
+		const avatar = document.createElement('img');
+		avatar.classList.add('avatar');
+		avatar.src = './img/avatar.png';
+		messageContainer.appendChild(avatar);
+
+		// Message bubble
+		const messageBubble = document.createElement('div');
+		messageBubble.classList.add('message-bubble');
+
+		// Create a container inside the bubble for the sender and message
+		messageBubble.innerHTML = `
+        <span class="message-sender">${sender}:</span>
+        <div class="message-text">${message}</div>
+    `;
+
+		// Append bubble to container
+		messageContainer.appendChild(messageBubble);
+
+		// Date element outside of the bubble
+		const dateElement = document.createElement('span');
+		dateElement.classList.add('message-date');
+		dateElement.innerHTML = formattedDate;
+		messageContainer.appendChild(dateElement);
+
+		// Append to chat
+		chat.appendChild(messageContainer);
+
+		if (scrolledToBottom) {
+			window.scrollTo(0, document.body.scrollHeight);
+		}
+	}
+
+	// Helper function to format date
+	function formatDate(dateString) {
+		const date = new Date(dateString);
+		const day = String(date.getDate()).padStart(2, '0');
+		const month = String(date.getMonth() + 1).padStart(2, '0'); // Months are zero-based
+		const year = date.getFullYear();
+		const hours = String(date.getHours()).padStart(2, '0');
+		const minutes = String(date.getMinutes()).padStart(2, '0');
+
+		return `${day}/${month}/${year} ${hours}:${minutes}`;
+	}
+
+	function sendMessage() {
+		const messageBox = document.getElementById('messageBox');
+		const message = messageBox.value.trim();
+		const sender = localStorage.getItem("username");
+		// get current time
+		const date = new Date();
+		if (message === '') return;
+
+		if (connection && connection.readyState === WebSocket.OPEN) {
+			connection.send(JSON.stringify({
+				action: 'sendMessage',
+				sender: sender,
+				message: message,
+				date: date
+				// Use the stored username
+			}));
+			messageBox.value = '';
+
+		} else {
+			console.error('WebSocket is not open. Ready state:', connection.readyState);
+		}
+	}
+
+	function start() {
+
+		// console.log(gameCode);
+		fetch(`http://${server}/game/startGame`, {
+			method: "POST",
+			headers: {
+				'Content-Type': 'application/json'
+			},
+			body: JSON.stringify({ code: gameCode, name: localStorage.getItem("username") })
+		})
+			.then(response => {
+				if (!response.ok) {
+					return response.text().then(text => { throw new Error(text); });
+				}
+				return response.json();
+			})
+			.then(data => {
+				if (data.message) {
+					document.getElementById('hostGameError').style.display = "block";
+					document.getElementById('hostGameError').innerHTML = `<br>${data.message}`;
+				} else {
+					console.log('Game started:', data);
+				}
+			})
+			.catch(error => {
+				console.error('Error starting game:', error);
+				document.getElementById('hostGameError').style.display = "block";
+				document.getElementById('hostGameError').innerHTML = `<br>${error.message}`;
+			});
+
+	}
+	function leaveGame() {
+		// Xóa mã game và mật khẩu khỏi localStorage
+		localStorage.removeItem("code");
+		localStorage.removeItem("password");
+
+		// Đặt lại giao diện
+		menu.style.display = "block"; // Hiển thị lại menu chính
+		game.style.display = "none"; // Ẩn giao diện game
+		heading.style.display = "block"; // Hiển thị lại heading
+
+		// Reset các biến gameCode và password
+		gameCode = undefined;
+		password = undefined;
+		const chat = document.getElementById('chat');
+		while (chat.firstChild) {
+			chat.removeChild(chat.firstChild);
+		}
+
+		// connection.close();
+	}
+	setUpConnection();
+
+</script>
